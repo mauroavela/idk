@@ -1,0 +1,187 @@
+using UnityEngine;
+
+public class Launcher : MonoBehaviour
+{
+    public float launchForce = 10f;
+    public float handDistance = 1f; // Distance between the hand and the ball (adjust as needed)
+    public int trajectoryPointCount = 100; // Number of points in the trajectory
+    public float timeStep = 0.05f; // Time step for trajectory prediction
+
+    private Vector2 aimDirection;
+    private Rigidbody2D existingBallRb; // Reference to the Rigidbody2D of the existing ball
+    private bool ballLaunched = false; // Flag to track if the ball has been launched
+    private LineRenderer trajectoryLine;
+
+    void Start()
+    {
+        // Find the existing ball in the scene
+        GameObject existingBall = GameObject.FindWithTag("Ball"); // Replace with the actual tag of your existing ball
+
+        if (existingBall != null)
+        {
+            existingBallRb = existingBall.GetComponent<Rigidbody2D>();
+
+            // Disable gravity for the existing ball initially
+            if (existingBallRb != null)
+            {
+                existingBallRb.gravityScale = 0f;
+            }
+            else
+            {
+                Debug.LogError("Rigidbody2D component not found on the existing ball.");
+            }
+        }
+        else
+        {
+            Debug.LogError("Existing ball not found in the scene.");
+        }
+
+        // Initialize the line renderer
+        trajectoryLine = GetComponent<LineRenderer>();
+        trajectoryLine.positionCount = trajectoryPointCount;
+    }
+
+    void Update()
+    {
+        // If the ball has been launched and is out of bounds, reset it to the launcher
+        if (ballLaunched && IsBallOutOfBounds())
+        {
+            ResetBall();
+        }
+
+        // Calculate the direction between the launcher and the mouse position
+        Vector3 mousePosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        aimDirection = (mousePosition - transform.position).normalized;
+
+        // Update the launcher's rotation continuously
+        float angle = Mathf.Atan2(aimDirection.y, aimDirection.x) * Mathf.Rad2Deg - 80;
+        transform.rotation = Quaternion.AngleAxis(angle, Vector3.forward);
+
+        // Visual feedback or aiming assistance can be added here if needed
+
+        // Update the position of the existing ball to closely follow the hand's rotation
+        if (existingBallRb != null && !ballLaunched)
+        {
+            Vector2 handPosition = transform.position;
+            Vector2 ballPosition = handPosition + aimDirection * handDistance;
+            existingBallRb.position = ballPosition;
+        }
+
+        // Check for the launch input
+        if (Input.GetMouseButtonDown(0))
+        {
+            LaunchBall();
+        }
+
+        // Always update the trajectory, even if the ball is not launched
+        UpdateTrajectory();
+    }
+
+    void RotateLauncherToBall()
+    {
+        if (existingBallRb != null)
+        {
+            Vector2 directionToBall = existingBallRb.position - (Vector2)transform.position;
+            float angleToBall = Mathf.Atan2(directionToBall.y, directionToBall.x) * Mathf.Rad2Deg - 80;
+            transform.rotation = Quaternion.AngleAxis(angleToBall, Vector3.forward);
+        }
+    }
+
+    void LaunchBall()
+    {
+        if (existingBallRb != null)
+        {
+            // Enable gravity for the existing ball
+            existingBallRb.gravityScale = 1f;
+
+            // Calculate the launch force direction
+            Vector2 launchDirection = aimDirection.normalized;
+
+            // Apply force to launch the existing ball
+            existingBallRb.AddForce(launchDirection * launchForce, ForceMode2D.Impulse);
+
+            // Set the flag to indicate that the ball has been launched
+            ballLaunched = true;
+        }
+    }
+
+    bool IsBallOutOfBounds()
+    {
+        // Check if the existing ball is out of bounds based on camera limits
+        Vector3 viewportPosition = Camera.main.WorldToViewportPoint(existingBallRb.position);
+        return viewportPosition.x < 0 || viewportPosition.x > 1 || viewportPosition.y < 0 || viewportPosition.y > 1;
+    }
+
+    void ResetBall()
+    {
+        // Reset the ball to the launcher's position and velocity
+        existingBallRb.velocity = Vector2.zero;
+        existingBallRb.angularVelocity = 0f;
+        existingBallRb.position = transform.position;
+
+        // Disable gravity for the existing ball
+        existingBallRb.gravityScale = 0f;
+
+        // Reset the flag to indicate that the ball is ready to be launched again
+        ballLaunched = false;
+
+        // Clear the trajectory line
+        trajectoryLine.positionCount = 0;
+    }
+
+    void UpdateTrajectory()
+    {
+        if (!ballLaunched || existingBallRb == null)
+        {
+            trajectoryLine.positionCount = 0;
+            return;
+        }
+
+        // Initialize trajectory variables
+        Vector2 currentPosition = existingBallRb.position;
+        Vector2 currentVelocity = existingBallRb.velocity;
+
+        for (int i = 0; i < trajectoryPointCount; i++)
+        {
+            // Predict the position at the next time step
+            currentPosition += currentVelocity * timeStep;
+
+            // Update the velocity based on gravity (adjust as needed)
+            currentVelocity += Physics2D.gravity * timeStep;
+
+            // Check for collisions with pegs and adjust the trajectory
+            Vector2 collisionPoint = CheckPegCollision(currentPosition, currentVelocity);
+
+            if (collisionPoint != Vector2.zero)
+            {
+                // Bounce off the peg
+                currentVelocity = CalculateReflection(currentVelocity, collisionPoint - currentPosition);
+            }
+
+            // Set the trajectory point position
+            trajectoryLine.SetPosition(i, currentPosition);
+        }
+    }
+
+
+    Vector2 CheckPegCollision(Vector2 position, Vector2 velocity)
+    {
+        // Raycast to check for collisions with pegs
+        RaycastHit2D hit = Physics2D.Raycast(position, velocity, velocity.magnitude * timeStep);
+
+        if (hit.collider != null && hit.collider.CompareTag("Peg"))
+        {
+            // If hit, return the collision point
+            return hit.point;
+        }
+
+        // If no collision, return Vector2.zero
+        return Vector2.zero;
+    }
+
+    Vector2 CalculateReflection(Vector2 incident, Vector2 normal)
+    {
+        // Calculate the reflection direction based on the incident and normal vectors
+        return incident - 2f * Vector2.Dot(incident, normal) * normal;
+    }
+}
